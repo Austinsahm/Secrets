@@ -4,10 +4,10 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-// const encrypt = require("mongoose-encryption");
-// const md5 = require("md5");
-const bcrypt = require("bcrypt");
-const saltRounds = 10;
+const session = require('express-session');
+const passport = require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
+
 
 let port = process.env.PORT;
 if (port == null || port == "") {
@@ -19,6 +19,15 @@ const app = express();
 app.use(express.static("public"));
 app.set("view engine", "ejs");
 app.use(bodyParser.urlencoded({ extended: true }));
+
+app.use(session({
+    secret: "Our little secret.",
+    resave: false,
+    saveUninitialized: false
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
 
 
 main().catch((err) => {
@@ -33,9 +42,16 @@ async function main() {
         password: String,
     });
 
-    // userSchema.plugin(encrypt, { secret: process.env.SECRET, encryptedFields: ["password"] });
+    userSchema.plugin(passportLocalMongoose);
+
 
     const User = new mongoose.model("User", userSchema);
+
+    // CHANGE: USE "createStrategy" INSTEAD OF "authenticate"
+    passport.use(User.createStrategy());
+
+    passport.serializeUser(User.serializeUser());
+    passport.deserializeUser(User.deserializeUser());
 
 
     app.get("/", (req, res) => {
@@ -47,26 +63,21 @@ async function main() {
             res.render("login");
         })
         .post((req, res) => {
-            const username = req.body.username;
-            const password = req.body.password;
+            const user = new User({
+                username: req.body.username,
+                password: req.body.password
+            });
 
-            User.findOne({ email: username }).then((foundUser) => {
-                if (foundUser) {
-                    bcrypt.compare(password, foundUser.password).then(function (result) {
-                        // result == true
-                        if (result === true) {
-                            res.render("secrets");
-                        } else {
-                            res.send("Incorrect Password!");
-                        }
-                    });
+            req.login(user, function (err) {
+                if (err) {
+                    console.log(err);
                 } else {
-                    res.send("Invalid login details")
+                    passport.authenticate("local")(req, res, function () {
+                        res.redirect("/secrets");
+                    })
                 }
-            }).catch((err) => {
-                console.log(err);
-            })
 
+            })
         });
 
     app.route("/register")
@@ -74,27 +85,36 @@ async function main() {
             res.render("register");
         })
         .post((req, res) => {
-            bcrypt.hash(req.body.password, saltRounds).then(function (hash) {
-                // Store hash in your password DB.
-                const newUser = new User({
-                    email: req.body.username,
-                    password: hash
-                });
-
-                newUser.save().then((saved) => {
-                    if (saved) {
-                        // res.send("User Register").status(200);
-                        res.render("secrets");
-                    } else {
-                        res.send("User not Resgister").status(400)
-                    }
-                }).catch((err) => { console.log(err) })
-            });
+            User.register({ username: req.body.username }, req.body.password, function (err, user) {
+                if (err) {
+                    console.log(err);
+                    res.redirect("/register");
+                } else {
+                    passport.authenticate("local")(req, res, function () {
+                        res.redirect("/secrets");
+                    })
+                }
+            })
 
 
         })
 
 
+    app.get("/secrets", function (req, res) {
+        if (req.isAuthenticated()) {
+            res.render("secrets");
+        } else {
+            res.redirect("/login");
+        }
+    });
+
+
+    app.get("/logout", (req, res) => {
+        req.logout(function (err) {
+            if (err) { return next(err); }
+            res.redirect('/');
+        });
+    });
 
     app.listen(port, () => {
         console.log(`Server is running on port ${port}`);
