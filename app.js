@@ -43,6 +43,7 @@ async function main() {
         email: String,
         password: String,
         googleId: String,
+        secret: String,
     });
 
     userSchema.plugin(passportLocalMongoose);
@@ -144,10 +145,46 @@ async function main() {
 
     app.get("/secrets", function (req, res) {
         if (req.isAuthenticated()) {
-            res.render("secrets");
+            User.find({ "secret": { $ne: null } }).then((foundUser) => {
+                if (foundUser) {
+                    res.render("secrets", { usersWithSecrets: foundUser });
+                } else (
+                    console.log("User not found")
+                )
+            }).catch((err) => {
+                console.log(err);
+            })
         } else {
             res.redirect("/login");
         }
+
+
+    });
+
+
+    app.get("/submit", (req, res) => {
+        if (req.isAuthenticated()) {
+            res.render("submit");
+        } else {
+            res.redirect("/login");
+        }
+    });
+
+    app.post("/submit", (req, res) => {
+        const submittedSecret = req.body.secret;
+
+        console.log(req.user.id);
+
+        User.findById(req.user.id).then((foundUser) => {
+            if (!foundUser) {
+                throw new Error('Could not find user');
+            } else {
+                foundUser.secret = submittedSecret;
+                foundUser.save();
+                res.redirect("/secrets");
+            }
+
+        })
     });
 
 
